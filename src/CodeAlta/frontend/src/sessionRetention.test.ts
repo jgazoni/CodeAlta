@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { collectSessionRetention, createSessionRetention, type RetentionPublication, type RetentionStorage } from "./sessionRetention";
 import { sessionTabsKey } from "./sessionTabs";
-import { draftStorageKey } from "./promptDraft";
+import { createDraftIndicators, draftStorageKey, persistDraft } from "./promptDraft";
 import { createImageDrafts } from "./promptImages";
 
 const storage = (values: Record<string, string>): RetentionStorage => ({
@@ -140,6 +140,42 @@ test("a publication that the host acknowledges with no new claim renders nothing
   await owner.publish("epoch");
   assert.equal(observed, after + 1);
   assert.equal(owner.hasClaim("epoch", "draft"), true);
+});
+
+test("an admission of sessions already claimed still exposes, without rendering the window again", async () => {
+  const owner = createSessionRetention(async () => ({ accepted: true, reason: null }), empty, "page");
+  assert.equal(await owner.admit("epoch", ["open"], () => true, () => {}), true);
+  let observed = 0;
+  owner.subscribe(() => { observed++; });
+  let exposed = false;
+  assert.equal(await owner.admit("epoch", ["open"], () => true, () => { exposed = true; }), true);
+  assert.equal(exposed, true);
+  assert.equal(observed, 0);
+});
+
+test("a new draft is claimed once its first write is stored, the keys after it publish nothing", async () => {
+  // The composer marks the edit, then writes it in an effect: the first publication may read the storage before the
+  // write, the change of the mark that the write makes publishes after it.
+  const values: Record<string, string> = {};
+  const requests: RetentionPublication[] = [];
+  const owner = createSessionRetention(async request => { requests.push(request); return { accepted: true, reason: null }; },
+    () => collectSessionRetention(() => storage(values)), "page");
+  const indicators = createDraftIndicators();
+  indicators.subscribe(() => { void owner.publish("epoch"); });
+  const settle = () => new Promise(resolve => setTimeout(resolve, 0));
+  const type = async (text: string) => {
+    const edit = indicators.edit("drafted", text, "");
+    await settle();
+    indicators.persisted("drafted", edit, persistDraft((key, value) => { values[key] = value; }, key => { delete values[key]; }, "drafted", text));
+    await settle();
+  };
+  await type("d");
+  assert.equal(requests.length, 2);
+  assert.deepEqual(requests[0].sessionIds, [], "the first publication read the storage before the write");
+  assert.deepEqual(requests[1].sessionIds, ["drafted"]);
+  assert.equal(owner.hasClaim("epoch", "drafted"), true);
+  for (const text of ["dr", "dra", "draf", "draft"]) await type(text);
+  assert.equal(requests.length, 2);
 });
 
 test("a synchronous lifetime change during acknowledgement notification cannot expose an admission", async () => {

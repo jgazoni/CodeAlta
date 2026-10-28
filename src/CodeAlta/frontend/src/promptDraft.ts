@@ -71,10 +71,11 @@ export function createDraftIndicators() {
       const valid = text.length > 0 && text.length <= maximumDraftUnits && text !== restored
         && !/^[\s\u0085]*$/u.test(text) && isWellFormed(text);
       if (!valid) { if (edits.delete(id)) publish(); return null; }
-      // Each edit gets an exact identity; an earlier persistence effect cannot certify this edit.
+      // Each edit gets an exact identity: only the write of this edit can change its mark, a late write of an earlier
+      // one cannot. Until its own write answers, an edit of a draft already marked keeps the mark of the last write,
+      // which still says what storage holds. The listeners, the window among them, are told only when the mark
+      // changes, never at each key: the retention sees a new draft through the change its first write makes.
       const current = ++generation, previous = edits.get(id);
-      // A keystroke in a draft already edited keeps its mark, until its own write says otherwise: the listeners,
-      // the window among them, are told only when the mark changes, never at each key.
       edits.set(id, { generation: current, persisted: previous?.persisted ?? false });
       if (!previous) publish();
       return current;

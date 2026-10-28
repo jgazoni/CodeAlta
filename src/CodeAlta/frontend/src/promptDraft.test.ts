@@ -90,6 +90,33 @@ test("the keystrokes of a draft already marked edited tell its listeners nothing
   assert.equal(notified, 4);
 });
 
+test("a key typed after a kept write keeps the mark of another session until its own write answers", () => {
+  const indicators = createDraftIndicators();
+  indicators.persisted("one", indicators.edit("one", "draft", ""), true);
+  let notified = 0;
+  indicators.subscribe(() => { notified++; });
+  const next = indicators.edit("one", "drafts", "");
+  // The stored draft is still there: the other sessions go on showing it, and no one is told.
+  assert.equal(indicators.visible("one", "other"), true);
+  assert.equal(notified, 0);
+  indicators.persisted("one", next, true);
+  assert.equal(notified, 0);
+});
+
+test("a first write that fails, then a key whose write is kept, tells the listeners once", () => {
+  const indicators = createDraftIndicators();
+  indicators.persisted("one", indicators.edit("one", "d", ""), false);
+  assert.equal(indicators.visible("one", "other"), false);
+  let notified = 0;
+  indicators.subscribe(() => { notified++; });
+  const next = indicators.edit("one", "dr", "");
+  assert.equal(indicators.visible("one", "other"), false, "a failed write certifies nothing for the next key");
+  assert.equal(notified, 0);
+  indicators.persisted("one", next, true);
+  assert.equal(notified, 1);
+  assert.equal(indicators.visible("one", "other"), true);
+});
+
 test("restored, invalid, whitespace, oversized and uncertain retained drafts never receive a badge", () => {
   const indicators = createDraftIndicators();
   indicators.edit("one", "restored", "restored");
